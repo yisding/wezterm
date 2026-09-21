@@ -77,8 +77,11 @@ fn libpng() {
     if let Ok(arch) = env::var("CARGO_CFG_TARGET_ARCH") {
         match arch.as_str() {
             "aarch64" | "arm" => {
+                // libpng/arm/filter_neon.S is a deprecated stub that compiles to
+                // nothing unless PNG_ARM_NEON_IMPLEMENTATION == 2; upstream libpng
+                // removed all references to it.  MSVC's cl.exe cannot compile .S
+                // files at all, which breaks the aarch64-pc-windows-msvc build.
                 cfg.file("libpng/arm/arm_init.c")
-                    .file("libpng/arm/filter_neon.S")
                     .file("libpng/arm/filter_neon_intrinsics.c")
                     .file("libpng/arm/palette_neon_intrinsics.c");
             }
