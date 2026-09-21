@@ -5,62 +5,64 @@ fn main() {
     {
         use anyhow::Context as _;
         use std::io::Write;
-        use std::path::Path;
+        use std::path::{Path, PathBuf};
         let profile = std::env::var("PROFILE").unwrap();
         let repo_dir = std::env::current_dir()
             .ok()
             .and_then(|cwd| cwd.parent().map(|p| p.to_path_buf()))
             .unwrap();
-        let exe_output_dir = repo_dir.join("target").join(profile);
+        // OUT_DIR is `target/<triple?>/<profile>/build/<pkg>-<hash>/out`, so
+        // the directory holding the executables is three levels up. Deriving
+        // it this way keeps us correct when cargo is invoked with `--target`,
+        // where the binaries do not land in `target/<profile>`.
+        let out_dir = std::env::var("OUT_DIR").unwrap();
+        let exe_output_dir = Path::new(&out_dir)
+            .ancestors()
+            .nth(3)
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| repo_dir.join("target").join(&profile));
         let windows_dir = repo_dir.join("assets").join("windows");
 
-        let conhost_dir = windows_dir.join("conhost");
-        for name in &["conpty.dll", "OpenConsole.exe"] {
-            let dest_name = exe_output_dir.join(name);
-            let src_name = conhost_dir.join(name);
-
-            if !dest_name.exists() {
-                std::fs::copy(&src_name, &dest_name)
-                    .context(format!(
-                        "copy {} -> {}",
-                        src_name.display(),
-                        dest_name.display()
-                    ))
-                    .unwrap();
-            }
-        }
-
-        let angle_dir = windows_dir.join("angle");
-        for name in &["libEGL.dll", "libGLESv2.dll"] {
-            let dest_name = exe_output_dir.join(name);
-            let src_name = angle_dir.join(name);
-
-            if !dest_name.exists() {
-                std::fs::copy(&src_name, &dest_name)
-                    .context(format!(
-                        "copy {} -> {}",
-                        src_name.display(),
-                        dest_name.display()
-                    ))
-                    .unwrap();
-            }
-        }
-
+        // The sideloaded binaries are architecture specific, so select the
+        // set that matches the architecture we are building for.
+        let arch = match std::env::var("CARGO_CFG_TARGET_ARCH")
+            .unwrap_or_default()
+            .as_str()
         {
-            let dest_mesa = exe_output_dir.join("mesa");
-            let _ = std::fs::create_dir(&dest_mesa);
-            let dest_name = dest_mesa.join("opengl32.dll");
-            let src_name = windows_dir.join("mesa").join("opengl32.dll");
-            if !dest_name.exists() {
-                std::fs::copy(&src_name, &dest_name)
-                    .context(format!(
-                        "copy {} -> {}",
-                        src_name.display(),
-                        dest_name.display()
-                    ))
-                    .unwrap();
+            "aarch64" => "arm64",
+            _ => "x64",
+        };
+
+        // Not every asset is available for every architecture; there is no
+        // arm64 build of mesa, for example.  wezterm degrades gracefully when
+        // these are absent, so skip missing sources rather than failing the
+        // build.
+        let copy_asset = |src: PathBuf, dest: PathBuf| {
+            if dest.exists() || !src.exists() {
+                return;
             }
+            if let Some(parent) = dest.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            std::fs::copy(&src, &dest)
+                .context(format!("copy {} -> {}", src.display(), dest.display()))
+                .unwrap();
+        };
+
+        let conhost_dir = windows_dir.join("conhost").join(arch);
+        for name in &["conpty.dll", "OpenConsole.exe"] {
+            copy_asset(conhost_dir.join(name), exe_output_dir.join(name));
         }
+
+        let angle_dir = windows_dir.join("angle").join(arch);
+        for name in &["libEGL.dll", "libGLESv2.dll"] {
+            copy_asset(angle_dir.join(name), exe_output_dir.join(name));
+        }
+
+        copy_asset(
+            windows_dir.join("mesa").join(arch).join("opengl32.dll"),
+            exe_output_dir.join("mesa").join("opengl32.dll"),
+        );
 
         // If a file named `.tag` is present, we'll take its contents for the
         // version number that we report in wezterm -h.

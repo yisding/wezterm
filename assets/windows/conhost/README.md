@@ -26,3 +26,20 @@ then the files can be copied from `bin/x64/Release` to this location.
 It's possible that you'll need to download this runtime support package
 from MS in order for this to work:
 https://www.microsoft.com/en-us/download/details.aspx?id=53175
+
+## Architecture specific builds
+
+The binaries are split into per-architecture directories (`x64`, `arm64`) and
+`wezterm-gui/build.rs` copies the set matching the target architecture.
+
+The `arm64` binaries were taken from the official
+`Microsoft.Windows.Console.ConPTY` NuGet package that is published as a release
+asset of the ms-terminal project, rather than built locally:
+
+```
+curl -LO https://github.com/microsoft/terminal/releases/download/v1.24.11911.0/Microsoft.Windows.Console.ConPTY.1.24.260710001.nupkg
+unzip -j Microsoft.Windows.Console.ConPTY.*.nupkg \
+  runtimes/win-arm64/native/conpty.dll -d arm64/
+unzip -j Microsoft.Windows.Console.ConPTY.*.nupkg \
+  build/native/runtimes/arm64/OpenConsole.exe -d arm64/
+```

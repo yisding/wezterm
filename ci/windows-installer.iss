@@ -8,10 +8,21 @@
 #define MyAppURL "http://wezterm.org"
 #define MyAppExeName "wezterm-gui.exe"
 
+; Directories holding the built binaries for each architecture.  Both are
+; optional: whichever ones exist at compile time are included, so a single
+; architecture build still produces a working installer.  ci/deploy.sh passes
+; these explicitly.
+#ifndef X64Dir
+  #define X64Dir "..\target\release"
+#endif
+#ifndef Arm64Dir
+  #define Arm64Dir "..\target\aarch64-pc-windows-msvc\release"
+#endif
+
 [Setup]
 AppId={{BCF6F0DA-5B9A-408D-8562-F680AE6E1EAF}
-ArchitecturesAllowed=x64 arm64
-ArchitecturesInstallIn64BitMode=x64 arm64
+ArchitecturesAllowed=x64compatible arm64
+ArchitecturesInstallIn64BitMode=x64compatible arm64
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 ;AppVerName={#MyAppName} {#MyAppVersion}
@@ -42,16 +53,47 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+; Work out which architectures we have binaries for.  When both are present we
+; emit a per-file Check so that each machine installs its native build; when
+; only one is present those files install unconditionally, which preserves the
+; existing behaviour of an x64-only installer running under emulation on arm64.
+#define HaveX64 FileExists(AddBackslash(SourcePath) + X64Dir + "\wezterm.exe")
+#define HaveArm64 FileExists(AddBackslash(SourcePath) + Arm64Dir + "\wezterm.exe")
+#if !HaveX64 && !HaveArm64
+  #error No built binaries found. Build wezterm first, or pass -DX64Dir / -DArm64Dir.
+#endif
+#if HaveX64 && HaveArm64
+  #define X64Check "; Check: not IsArm64Target"
+  #define Arm64Check "; Check: IsArm64Target"
+#else
+  #define X64Check ""
+  #define Arm64Check ""
+#endif
+
 [Files]
-Source: "..\target\release\wezterm.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\target\release\wezterm-gui.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\target\release\wezterm-mux-server.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\target\release\mesa\opengl32.dll"; DestDir: "{app}\mesa"; Flags: ignoreversion
-Source: "..\target\release\libEGL.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\target\release\libGLESv2.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\target\release\conpty.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\target\release\OpenConsole.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\target\release\strip-ansi-escapes.exe"; DestDir: "{app}"; Flags: ignoreversion
+#if HaveX64
+Source: "{#X64Dir}\wezterm.exe"; DestDir: "{app}"; Flags: ignoreversion{#X64Check}
+Source: "{#X64Dir}\wezterm-gui.exe"; DestDir: "{app}"; Flags: ignoreversion{#X64Check}
+Source: "{#X64Dir}\wezterm-mux-server.exe"; DestDir: "{app}"; Flags: ignoreversion{#X64Check}
+Source: "{#X64Dir}\strip-ansi-escapes.exe"; DestDir: "{app}"; Flags: ignoreversion{#X64Check}
+Source: "{#X64Dir}\mesa\opengl32.dll"; DestDir: "{app}\mesa"; Flags: ignoreversion skipifsourcedoesntexist{#X64Check}
+Source: "{#X64Dir}\libEGL.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist{#X64Check}
+Source: "{#X64Dir}\libGLESv2.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist{#X64Check}
+Source: "{#X64Dir}\conpty.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist{#X64Check}
+Source: "{#X64Dir}\OpenConsole.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist{#X64Check}
+#endif
+#if HaveArm64
+Source: "{#Arm64Dir}\wezterm.exe"; DestDir: "{app}"; Flags: ignoreversion{#Arm64Check}
+Source: "{#Arm64Dir}\wezterm-gui.exe"; DestDir: "{app}"; Flags: ignoreversion{#Arm64Check}
+Source: "{#Arm64Dir}\wezterm-mux-server.exe"; DestDir: "{app}"; Flags: ignoreversion{#Arm64Check}
+Source: "{#Arm64Dir}\strip-ansi-escapes.exe"; DestDir: "{app}"; Flags: ignoreversion{#Arm64Check}
+; mesa has no arm64 build; wezterm falls back to the system GL driver there
+Source: "{#Arm64Dir}\mesa\opengl32.dll"; DestDir: "{app}\mesa"; Flags: ignoreversion skipifsourcedoesntexist{#Arm64Check}
+Source: "{#Arm64Dir}\libEGL.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist{#Arm64Check}
+Source: "{#Arm64Dir}\libGLESv2.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist{#Arm64Check}
+Source: "{#Arm64Dir}\conpty.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist{#Arm64Check}
+Source: "{#Arm64Dir}\OpenConsole.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist{#Arm64Check}
+#endif
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]
@@ -77,6 +119,13 @@ Root: HKA; Subkey: "Software\Classes\Directory\shell\Open WezTerm here\command";
 const EnvironmentKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
 
 const IMAGE_FILE_MACHINE_AMD64 = $8664;
+
+{ True when the machine we are installing on is arm64.  Used to pick the
+  native binaries when the installer carries both architectures. }
+function IsArm64Target(): Boolean;
+begin
+  Result := ProcessorArchitecture = paArm64;
+end;
 
 function GetMachineTypeAttributes(
     Machine: Word; var MachineTypeAttributes: Integer): HRESULT;
