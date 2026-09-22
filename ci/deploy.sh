@@ -132,22 +132,29 @@ case $OSTYPE in
     fi
     # Name the zip for the architecture it actually holds, so that an arm64
     # build cannot be mistaken for the x64 one.  x64 keeps the historical
-    # name, which the download pages and ci/subst-release-info.py match.  The
-    # installer keeps an architecture-neutral name, because a single installer
-    # can carry both architectures.
+    # name, which the download pages and ci/subst-release-info.py match.
     if [[ "$zipsrc" == "$arm64_dir" ]] ; then
       zipflavour=windows-arm64
     else
       zipflavour=windows
     fi
+    # A single installer can carry both architectures and keeps the neutral
+    # name, but the arm64 CI job runs separately from the x64 one, so an
+    # installer holding only arm64 is named for it; otherwise the two jobs
+    # would upload colliding assets to the same release.
+    if [[ -n "$arm64_dir" && -z "$x64_dir" ]] ; then
+      instarch=-arm64
+    else
+      instarch=
+    fi
 
     zipdir=WezTerm-$zipflavour-$TAG_NAME
     if [[ "$BUILD_REASON" == "Schedule" ]] ; then
       zipname=WezTerm-$zipflavour-nightly.zip
-      instname=WezTerm-nightly-setup
+      instname=WezTerm-nightly${instarch}-setup
     else
       zipname=$zipdir.zip
-      instname=WezTerm-${TAG_NAME}-setup
+      instname=WezTerm-${TAG_NAME}${instarch}-setup
     fi
 
     rm -rf $zipdir $zipname

@@ -21,7 +21,8 @@ CATEGORIZE = {
     r"^WezTerm-macos-.*.zip$": "macos_zip",
     r"^WezTerm-windows-(?!arm64-).*.zip$": "windows_zip",
     r"^WezTerm-windows-arm64-.*.zip$": "windows_arm64_zip",
-    r"^WezTerm-.*.setup.exe$": "windows_exe",
+    r"^WezTerm-(?!.*-arm64-setup).*.setup.exe$": "windows_exe",
+    r"^WezTerm-.*-arm64-setup.exe$": "windows_arm64_exe",
     r"alpine(\d+)\.(\d+)(:?-\S+)?.apk": "alpine\\1_\\2_apk",
 }
 

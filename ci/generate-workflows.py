@@ -728,7 +728,10 @@ rustup default {toolchain}
 
     def create_winget_pr(self):
         steps = []
-        if "windows" in self.name:
+        # The winget manifest tracks the x64 installer, so only the x64 job
+        # opens a PR.  The arm64 job builds an installer of its own and has
+        # no manifest to update.
+        if self.name == "windows":
             steps += [
                 ActionStep(
                     "Checkout winget-pkgs",
@@ -1014,6 +1017,11 @@ TARGETS = [
     # Target(container="alpine:3.15"),
 
     Target(name="windows", os="windows-2025", rust_target="x86_64-pc-windows-msvc"),
+    Target(
+        name="windows-arm64",
+        os="windows-11-arm",
+        rust_target="aarch64-pc-windows-msvc",
+    ),
 ]
 
 
