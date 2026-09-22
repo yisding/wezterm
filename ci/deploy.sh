@@ -102,31 +102,89 @@ case $OSTYPE in
 
     ;;
   msys|cygwin)
-    zipdir=WezTerm-windows-$TAG_NAME
+    # Work out which architectures have been built.  A build with no explicit
+    # --target lands in $TARGET_DIR/release and is necessarily for the host
+    # architecture, which rustc tells us; an explicit --target build lands in
+    # a per-target subdirectory instead.  Both feed the installer, so a tree
+    # built for each architecture yields a single installer that carries both
+    # and installs the native set.
+    host_triple=$(rustc -vV | sed -n 's/^host: //p')
+    x64_dir=
+    arm64_dir=
+    if [[ -f "$TARGET_DIR/release/wezterm.exe" ]] ; then
+      case "$host_triple" in
+        aarch64-*) arm64_dir="$TARGET_DIR/release" ;;
+        *) x64_dir="$TARGET_DIR/release" ;;
+      esac
+    fi
+    if [[ -f "$TARGET_DIR/x86_64-pc-windows-msvc/release/wezterm.exe" ]] ; then
+      x64_dir="$TARGET_DIR/x86_64-pc-windows-msvc/release"
+    fi
+    if [[ -f "$TARGET_DIR/aarch64-pc-windows-msvc/release/wezterm.exe" ]] ; then
+      arm64_dir="$TARGET_DIR/aarch64-pc-windows-msvc/release"
+    fi
+
+    # The zip carries a single architecture; prefer x64 when both are present.
+    zipsrc="${x64_dir:-$arm64_dir}"
+    if [[ -z "$zipsrc" ]] ; then
+      echo "no release binaries found under $TARGET_DIR" >&2
+      exit 1
+    fi
+    # Name the zip for the architecture it actually holds, so that an arm64
+    # build cannot be mistaken for the x64 one.  x64 keeps the historical
+    # name, which the download pages and ci/subst-release-info.py match.  The
+    # installer keeps an architecture-neutral name, because a single installer
+    # can carry both architectures.
+    if [[ "$zipsrc" == "$arm64_dir" ]] ; then
+      zipflavour=windows-arm64
+    else
+      zipflavour=windows
+    fi
+
+    zipdir=WezTerm-$zipflavour-$TAG_NAME
     if [[ "$BUILD_REASON" == "Schedule" ]] ; then
-      zipname=WezTerm-windows-nightly.zip
+      zipname=WezTerm-$zipflavour-nightly.zip
       instname=WezTerm-nightly-setup
     else
       zipname=$zipdir.zip
       instname=WezTerm-${TAG_NAME}-setup
     fi
+
     rm -rf $zipdir $zipname
     mkdir $zipdir
-    cp $TARGET_DIR/release/wezterm.exe \
-      $TARGET_DIR/release/wezterm-mux-server.exe \
-      $TARGET_DIR/release/wezterm-gui.exe \
-      $TARGET_DIR/release/strip-ansi-escapes.exe \
-      $TARGET_DIR/release/wezterm.pdb \
-      assets/windows/conhost/conpty.dll \
-      assets/windows/conhost/OpenConsole.exe \
-      assets/windows/angle/libEGL.dll \
-      assets/windows/angle/libGLESv2.dll \
+    # wezterm-gui's build script stages the architecture-appropriate conhost,
+    # angle and mesa binaries alongside the executables, so take them from
+    # there rather than from assets/windows, which is now split per
+    # architecture.  Not every asset exists for every architecture -- there is
+    # no arm64 build of angle or mesa -- so copy whichever are present.
+    cp $zipsrc/wezterm.exe \
+      $zipsrc/wezterm-mux-server.exe \
+      $zipsrc/wezterm-gui.exe \
+      $zipsrc/strip-ansi-escapes.exe \
+      $zipsrc/wezterm.pdb \
       $zipdir
-    mkdir $zipdir/mesa
-    cp $TARGET_DIR/release/mesa/opengl32.dll \
-        $zipdir/mesa
+    for asset in conpty.dll OpenConsole.exe libEGL.dll libGLESv2.dll ; do
+      if [[ -f "$zipsrc/$asset" ]] ; then
+        cp "$zipsrc/$asset" $zipdir
+      fi
+    done
+    if [[ -f "$zipsrc/mesa/opengl32.dll" ]] ; then
+      mkdir $zipdir/mesa
+      cp "$zipsrc/mesa/opengl32.dll" $zipdir/mesa
+    fi
     7z a -tzip $zipname $zipdir
-    iscc.exe -DMyAppVersion=${TAG_NAME#nightly} -F${instname} ci/windows-installer.iss
+
+    # windows-installer.iss resolves relative source directories against its
+    # own directory, so express them relative to ci/.  Both defines are always
+    # passed, including as an empty value: omitting one lets the .iss fall
+    # back to its own default path, and $TARGET_DIR/release holds whichever
+    # architecture is native to the build machine, so that default would
+    # silently offer an arm64 build to x64 machines.  An empty value names no
+    # directory, and that architecture is left out of the installer.
+    iscc.exe -DMyAppVersion=${TAG_NAME#nightly} \
+      "-DX64Dir=${x64_dir:+../$x64_dir}" \
+      "-DArm64Dir=${arm64_dir:+../$arm64_dir}" \
+      -F${instname} ci/windows-installer.iss
     ;;
   linux-gnu|linux)
     distro=$(lsb_release -is 2>/dev/null || sh -c "source /etc/os-release && echo \$NAME")
